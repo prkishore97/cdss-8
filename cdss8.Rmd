@@ -1,0 +1,140 @@
+---
+title: "CDSS-8 Peer-graded Assignment: Prediction Assignment Writeup"
+author: "Ram Kishore Pasupathi"
+date: "5 September 2018"
+output: html_document
+---
+## Introduction to the project
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+<br /> 
+<h3> Data </h3>
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+<br /> 
+<h2> Analysis </h2>
+<h3> Summary </h3>
+1. Load the data set and briefly learn the characteristics of the data
+2. Choosing covariants by,
+    + removing variables with near zero variance
+    + removing variables with high correlation (as PCA returned model with less accuracy)
+    + removing variables with high percentage (>95%) of NA values
+3. Partioning data into test, train and validate datasets
+4. Building Decision tree
+5. Building Random Forest 
+6. Prediction on Validation datasets
+7. Calculating accuracy & deciding the best classification model
+8. Classification based on the test dataset
+<br /> 
+
+<h3>Loading Datasets </h3>
+```{r, cache=TRUE}
+data_train=read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"))
+data_test=read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"))
+dim(data_train)
+```
+<h3> Removing variables with non-zero variance </h3>
+As we observed that the dataset contains a massive range of variables, choosing the right coviant becomes ideal. Hence, we use nearZeroVar() function from caret package as the function removes variables with near zero variables.
+```{r, cache=TRUE}
+library(caret)
+nrv=nearZeroVar(data_train)
+refine_train=data_train[,-nrv]
+dim(refine_train)
+```
+Through nearZeroVar() approach we were able to reduce the variables to 100
+<br /> 
+<h3> Removing variables with NA values </h3>
+Significant varaibles have 97% of NA values. Retaining those variables within the dataset would yield no productive result, hence, dropping from the dataset.
+```{r, cache=TRUE}
+na_col=as.data.frame(colSums(is.na(refine_train)))
+na_df=as.data.frame(cbind("col"=rownames(na_col),"nas"=round(as.numeric(na_col[,1]/nrow(refine_train)),2)))
+nas=na_df[na_df$nas!=0,]
+refine_train=refine_train[,!(names(refine_train) %in% nas[,1])]
+dim(refine_train)
+```
+
+<h3> Removing inappropriate variables </h3>
+```{r, cache=TRUE}
+refine_train=refine_train[,-c(1,2,3,4,5)]
+dim(refine_train)
+```
+
+<h3> Multicolinearity Inspection </h3>
+A correllogram to identify multicolinearity 
+```{r, cache=TRUE}
+for_cor=refine_train
+library(corrgram)
+corrgram(for_cor[,!(names(for_cor) %in% "classe")], order=NULL, lower.panel=panel.shade,upper.panel=NULL, text.panel=panel.txt,main="Correllogram")
+```
+<h3> Removing highly correlated variables </h3>
+Further trimming by dropping the highly correlated variables in the dataset. 80% has been considered threshold where variables with more than 80% association has been dropped. NOte: An iteration of model creation along with PCA transformation was performed and due to the underformance of the transformed variables during model building process, the PCA componenets were dropped.
+```{r,cache=TRUE}
+refine_train2=refine_train
+refine_train2=as.data.frame(sapply(refine_train[,!(names(refine_train) %in% "classe")],as.numeric))
+m=abs(cor(refine_train2[,!((names(refine_train2)) %in% "classe")]))
+m[upper.tri(m)]=0
+diag(m)=0
+uncor_data=refine_train2[,!apply(m,2,function(x) any(x>0.8))]
+dim(uncor_data)
+```
+<h3> Partitioning into test and validation datasets </h3>
+```{r,cache=TRUE}
+uncor_data=data.frame(cbind(uncor_data,"classe"=refine_train$classe))
+intrain=createDataPartition(y=uncor_data$classe,p=0.8,list=F)
+training=uncor_data[intrain,]
+validation=uncor_data[-intrain,]
+```
+<h3> Decision Tree </h3>
+```{r,cache=TRUE}
+modelfit_dt=train(classe~.,data=training,method="rpart")
+library(rattle)
+fancyRpartPlot(modelfit_dt$finalModel)
+confusionMatrix(modelfit_dt)
+```
+Decision tree returns model with accuracy 57%
+<br /> 
+<h3> Random Forest </h3>
+```{r,cache=TRUE}
+library(randomForest)
+modelfit_rf=randomForest(classe~.,data=training)
+modelfit_rf
+```
+Regression tree error rate is 17%
+<br /> 
+<h3> Applying Random Forest model on Validation set </h3>
+```{r,cache=TRUE}
+pred_rf1=predict(modelfit_rf,validation)
+cm=table(pred_rf1,validation$classe)
+n=sum(cm)
+diag=diag(cm)
+accuracy=sum(diag)/n
+accuracy
+```
+<h3> Refining Test set </h3>
+```{r,cache=TRUE}
+refine_test=data_test[,-nrv]
+refine_test=refine_test[,-c(1,2,3,4,5)]
+refine_test=refine_test[,!(names(refine_test) %in% nas[,1])]
+refine_test=refine_test[,!(names(refine_test) %in% "problem_id")]
+testing=refine_test[,!apply(m,2,function(x) any(x>0.8))]
+dim(testing)
+```
+<h3> Applying Random Forest model on Test set </h3>
+```{r,cache=TRUE}
+final_pred=predict(modelfit_rf,testing)
+```
+<h2> Conclusion </h2>
+The prediction on test dataset is as follows,
+```{r,cache=TRUE}
+final_pred
+```
+The model was able to classify varibales with less error rate
+<br /> 
+<br /> 
+<br /> 
